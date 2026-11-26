@@ -251,6 +251,7 @@ internal object SystemFontStore {
             }
             committed = true
             setInt(context, key, customIndex(key))
+            queryDisplayName(context, uri)?.let { setCustomLabel(context, key, it) }
             SystemFontMounts.schedule(context, service, manifest)
             if (oldFile != null && oldFile != name) runCatching { service.deleteRemoteFile(oldFile) }
         } finally {
@@ -259,6 +260,129 @@ internal object SystemFontStore {
                 else cache(context, key).delete()
             }
             backup?.delete()
+            temporary.delete()
+        }
+        notifyReady(context)
+        FontOperation.current()?.complete()
+    }
+
+    fun customLabel(context: Context, key: String): String? =
+        context.settingsPrefs().getString("custom_font_label_$key", null)
+
+    private fun setCustomLabel(context: Context, key: String, label: String) {
+        context.settingsPrefs().edit().putString("custom_font_label_$key", label).commit()
+    }
+
+    private fun queryDisplayName(context: Context, uri: Uri): String? = runCatching {
+        context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+            if (it.moveToFirst() && !it.isNull(0)) it.getString(0) else null
+        }
+    }.getOrNull()
+
+    /** Import one unified font (e.g. PingFangOne) and apply it to both Chinese (ZH) and Latin (LATIN) simultaneously. */
+    @Synchronized
+    fun importZhLatin(context: Context, uri: Uri, onProgress: ((Progress) -> Unit)? = null) {
+        val zhKey = SystemFontHooks.ZH
+        val latinKey = SystemFontHooks.LATIN
+        val service = service()
+        val temporary = File.createTempFile("import-zhl-", ".font", directory(context))
+        var zhBackup: File? = null
+        var latinBackup: File? = null
+        var replaced = false
+        var committed = false
+        try {
+            FontOperation.report(FontOperation.Step.READ_IMPORT, uri.toString())
+            val expectedSize = runCatching {
+                context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null)?.use {
+                    if (it.moveToFirst() && !it.isNull(0)) it.getLong(0).coerceAtLeast(0) else 0L
+                } ?: 0L
+            }.getOrDefault(0L)
+            val displayName = queryDisplayName(context, uri)
+            onProgress?.invoke(Progress(R.string.ui_font_importing, total = expectedSize, detail = displayName ?: uri.toString()))
+            context.contentResolver.openInputStream(uri).use { input ->
+                requireNotNull(input)
+                FontOperation.track(input)
+                FileOutputStream(temporary).use { output ->
+                    val buffer = ByteArray(65536)
+                    var size = 0L
+                    var lastProgress = 0L
+                    while (true) {
+                        FontOperation.check()
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        size += count
+                        require(size <= FontFileInfo.MAX_BYTES) { "Font exceeds size limit" }
+                        output.write(buffer, 0, count)
+                        val now = android.os.SystemClock.elapsedRealtime()
+                        if (now - lastProgress >= 100) {
+                            onProgress?.invoke(Progress(R.string.ui_font_importing, size, expectedSize, detail = displayName ?: uri.toString()))
+                            lastProgress = now
+                        }
+                    }
+                    output.fd.sync()
+                }
+            }
+            onProgress?.invoke(Progress(R.string.ui_font_preparing, detail = displayName))
+            FontOperation.check()
+            FontOperation.report(FontOperation.Step.PARSE_FONT, uri.toString())
+            val faces = FontFileInfo.read(temporary)
+            for (face in faces) Font.Builder(temporary).setTtcIndex(face.index).build()
+
+            val remote = service.getRemotePreferences(SystemFontHooks.PREFS)
+            val oldZhFile = remote.getString(zhKey + "_file", null)
+            val oldLatinFile = remote.getString(latinKey + "_file", null)
+            val zhName = publish(service, zhKey, temporary)
+            val latinName = publish(service, latinKey, temporary)
+            val manifest = NativeFontBridge.prepare(
+                context,
+                service,
+                mapOf(
+                    zhKey to (customIndex(zhKey) to temporary),
+                    latinKey to (customIndex(latinKey) to temporary)
+                )
+            )
+            val zhCache = cache(context, zhKey)
+            val latinCache = cache(context, latinKey)
+            FontOperation.report(FontOperation.Step.SAVE_FONT, zhCache.name)
+            if (zhCache.exists()) {
+                zhBackup = File.createTempFile("previous-zh-", ".font", directory(context))
+                zhCache.copyTo(zhBackup, overwrite = true)
+            }
+            if (latinCache.exists()) {
+                latinBackup = File.createTempFile("previous-latin-", ".font", directory(context))
+                latinCache.copyTo(latinBackup, overwrite = true)
+            }
+            FontOperation.current()?.beginApplying()
+            onProgress?.invoke(Progress(R.string.ui_font_mounting, canCancel = false, detail = displayName))
+            temporary.copyTo(latinCache, overwrite = true)
+            check(temporary.renameTo(zhCache)) { "Cannot save font" }
+            replaced = true
+            check(
+                remote.edit()
+                    .putString(zhKey + "_file", zhName)
+                    .putInt(zhKey, customIndex(zhKey))
+                    .putString(latinKey + "_file", latinName)
+                    .putInt(latinKey, customIndex(latinKey))
+                    .putString("native_manifest", manifest)
+                    .commit()
+            ) { "Cannot save font settings" }
+            committed = true
+            setInt(context, zhKey, customIndex(zhKey))
+            setInt(context, latinKey, customIndex(latinKey))
+            if (!displayName.isNullOrBlank()) {
+                setCustomLabel(context, zhKey, displayName)
+                setCustomLabel(context, latinKey, displayName)
+            }
+            SystemFontMounts.schedule(context, service, manifest)
+            if (oldZhFile != null && oldZhFile != zhName) runCatching { service.deleteRemoteFile(oldZhFile) }
+            if (oldLatinFile != null && oldLatinFile != latinName) runCatching { service.deleteRemoteFile(oldLatinFile) }
+        } finally {
+            if (replaced && !committed) {
+                if (zhBackup != null) runCatching { zhBackup.renameTo(cache(context, zhKey)) } else cache(context, zhKey).delete()
+                if (latinBackup != null) runCatching { latinBackup.renameTo(cache(context, latinKey)) } else cache(context, latinKey).delete()
+            }
+            zhBackup?.delete()
+            latinBackup?.delete()
             temporary.delete()
         }
         notifyReady(context)
