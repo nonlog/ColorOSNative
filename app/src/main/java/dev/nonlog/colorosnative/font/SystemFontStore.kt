@@ -212,8 +212,7 @@ internal object SystemFontStore {
                         val count = input.read(buffer)
                         if (count < 0) break
                         size += count
-                        val limit = if (key == SystemFontHooks.EMOJI) FontFileInfo.MAX_BYTES else 100L * 1024 * 1024
-                        require(size <= limit) { "Font exceeds size limit" }
+                        require(size <= FontFileInfo.MAX_BYTES) { "Font exceeds size limit" }
                         output.write(buffer, 0, count)
                         val now = android.os.SystemClock.elapsedRealtime()
                         if (now - lastProgress >= 100) {
