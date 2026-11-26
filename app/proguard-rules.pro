@@ -1,0 +1,2 @@
+-keep class dev.nonlog.colorosnative.xposed.** { *; }
+-keep class dev.nonlog.colorosnative.font.NativeFontHooks { *; }

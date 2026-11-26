@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ColorOS Native</string>
+    <string name="xposed_description">ColorOS 17 系统字体替换 + 系统界面原生化模块（修复双卡堆叠信号）</string>
+
+    <string name="ui_font_preparing">正在准备字体…</string>
+    <string name="ui_font_importing">正在导入字体…</string>
+    <string name="ui_font_mounting">正在应用字体配置…</string>
+    <string name="ui_font_emoji_downloading">正在下载 Emoji 字体…</string>
+    <string name="ui_font_emoji_ready">字体已就绪，重启 Zygote 或重启设备生效</string>
+    <string name="ui_font_step_cache">检查本地缓存</string>
+    <string name="ui_font_step_request">请求远程字体</string>
+    <string name="ui_font_step_zip_directory">解析压缩包目录</string>
+    <string name="ui_font_step_zip_entry">定位字体条目</string>
+    <string name="ui_font_step_zip_header">解析文件头</string>
+    <string name="ui_font_step_decompress">解压字体文件</string>
+    <string name="ui_font_step_verify">校验字体完整性</string>
+    <string name="ui_font_step_parse">解析字体表</string>
+    <string name="ui_font_step_save">保存字体缓存</string>
+    <string name="ui_font_step_publish">同步到 LSPosed 远程文件</string>
+    <string name="ui_font_step_config">生成字体映射配置</string>
+    <string name="ui_font_step_load">加载字体</string>
+    <string name="ui_font_mount_failed">底层字体挂载失败</string>
+</resources>
